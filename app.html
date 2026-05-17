@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Memory Layer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000;
+      font-family: 'Outfit', sans-serif;
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Fullscreen camera */
+    #video {
+      width: 100vw; height: 100vh;
+      object-fit: cover;
+      display: block;
+      filter: brightness(.88) contrast(1.05);
+    }
+    #canvas {
+      position: fixed; inset: 0;
+      width: 100vw; height: 100vh;
+      pointer-events: none;
+    }
+
+    /* Corner marks */
+    .cm { position: fixed; width: 22px; height: 22px; border-color: rgba(79,195,247,.45); border-style: solid; }
+    .cm.tl { top:14px;left:14px; border-width:2px 0 0 2px; }
+    .cm.tr { top:14px;right:14px; border-width:2px 2px 0 0; }
+    .cm.bl { bottom:14px;left:14px; border-width:0 0 2px 2px; }
+    .cm.br { bottom:14px;right:14px; border-width:0 2px 2px 0; }
+
+    /* Status top-left */
+    #status-bar {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 8px;
+      font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 1.5px;
+      color: rgba(255,255,255,.3); text-transform: uppercase;
+      pointer-events: none;
+    }
+    #mic-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.2); transition: all .3s; }
+    #mic-dot.on { background: #ff5370; box-shadow: 0 0 8px rgba(255,83,112,.6); animation: mp 1.2s ease-in-out infinite; }
+    @keyframes mp { 0%,100%{transform:scale(1)} 50%{transform:scale(1.5)} }
+
+    /* Greeting — top center, big */
+    #greeting {
+      position: fixed; top: 60px; left: 50%; transform: translateX(-50%) translateY(-10px);
+      background: rgba(0,0,0,.7); backdrop-filter: blur(20px);
+      border: 1px solid rgba(79,195,247,.3);
+      color: #4fc3f7; padding: 12px 32px; border-radius: 40px;
+      font-size: 20px; font-weight: 600; white-space: nowrap;
+      pointer-events: none;
+      opacity: 0; transition: opacity .4s, transform .4s;
+    }
+    #greeting.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* AR panels */
+    #ar-left {
+      position: fixed; left: 20px; top: 50%; transform: translateY(-50%);
+      display: flex; flex-direction: column; gap: 10px;
+      pointer-events: none; opacity: 0; transition: opacity .5s;
+      width: 220px;
+    }
+    #ar-right {
+      position: fixed; right: 20px; top: 50%; transform: translateY(-50%);
+      display: flex; flex-direction: column; gap: 10px;
+      pointer-events: none; opacity: 0; transition: opacity .5s;
+      width: 220px;
+    }
+    #ar-left.show, #ar-right.show { opacity: 1; }
+
+    .glass {
+      background: rgba(6,12,22,.86);
+      backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 14px; padding: 14px 16px;
+    }
+    .g-label {
+      font-family: 'DM Mono', monospace; font-size: 8px; letter-spacing: 2px;
+      color: rgba(255,255,255,.25); text-transform: uppercase;
+      margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,.06); padding-bottom: 6px;
+    }
+    .g-name { font-size: 22px; font-weight: 700; color: #edf4ff; line-height: 1.1; margin-bottom: 4px; }
+    .g-role { font-size: 13px; color: #4fc3f7; font-weight: 500; margin-bottom: 4px; }
+    .g-conf { font-family: 'DM Mono', monospace; font-size: 10px; color: #69f0ae; }
+    .g-ctx  { font-size: 12px; color: rgba(255,255,255,.55); margin-top: 8px; line-height: 1.6; border-top: 1px solid rgba(255,255,255,.06); padding-top: 8px; }
+
+    .g-row  { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .g-row .k { font-size: 11px; color: rgba(255,255,255,.3); }
+    .g-row .v { font-size: 11px; color: rgba(255,255,255,.85); font-weight: 500; }
+
+    .g-hints { display: flex; flex-direction: column; gap: 5px; }
+    .g-hint {
+      font-size: 12px; color: rgba(255,255,255,.6); line-height: 1.4;
+      padding: 5px 10px; border-radius: 8px;
+      background: rgba(79,195,247,.07); border-left: 2px solid rgba(79,195,247,.3);
+    }
+
+    .g-hist { display: flex; flex-direction: column; gap: 5px; }
+    .g-hist-item { font-size: 11px; color: rgba(255,255,255,.5); line-height: 1.5; }
+    .g-hist-item .hd { font-family: 'DM Mono', monospace; font-size: 9px; color: rgba(255,255,255,.25); margin-right: 4px; }
+
+    /* Transcript — bottom center, large */
+    #transcript-wrap {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      padding: 32px 10vw;
+      background: linear-gradient(to top, rgba(0,0,0,.92) 0%, rgba(0,0,0,.65) 60%, transparent 100%);
+      pointer-events: none; text-align: center;
+    }
+    #t-speaker {
+      font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 2px;
+      color: #4fc3f7; text-transform: uppercase; margin-bottom: 8px;
+      display: block; opacity: 0; transition: opacity .3s;
+    }
+    #t-speaker.show { opacity: 1; }
+    #t-text {
+      font-size: 26px; font-weight: 500; color: #fff;
+      line-height: 1.4; text-shadow: 0 2px 16px rgba(0,0,0,.9);
+      opacity: 0; transition: opacity .25s;
+    }
+    #t-text.show { opacity: 1; }
+    #t-interim {
+      font-size: 18px; color: rgba(255,255,255,.35);
+      margin-top: 6px; line-height: 1.4;
+    }
+
+    /* No-setup overlay */
+    #no-setup {
+      position: fixed; inset: 0;
+      background: rgba(4,6,10,.97);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; z-index: 100;
+    }
+    #no-setup h2 { font-size: 20px; color: #ff5370; font-weight: 600; }
+    #no-setup p  { font-size: 14px; color: rgba(255,255,255,.4); text-align: center; max-width: 320px; line-height: 1.6; }
+    #no-setup code { background: rgba(255,255,255,.08); padding: 2px 8px; border-radius: 4px; font-family: 'DM Mono', monospace; font-size: 13px; color: #4fc3f7; }
+
+    /* Scanline */
+    #scanline {
+      position: fixed; left:0; right:0; height:1px;
+      background: linear-gradient(90deg, transparent, rgba(79,195,247,.5), transparent);
+      opacity:0; pointer-events:none;
+      animation: scan 3s linear infinite;
+    }
+    #scanline.on { opacity:.12; }
+    @keyframes scan { from{top:-1px} to{top:100%} }
+  </style>
+</head>
+<body>
+
+<video id="video" autoplay muted playsinline></video>
+<canvas id="canvas"></canvas>
+<div id="scanline"></div>
+
+<div class="cm tl"></div><div class="cm tr"></div>
+<div class="cm bl"></div><div class="cm br"></div>
+
+<div id="status-bar">
+  <div id="mic-dot"></div>
+  <span id="status-text">Đang khởi động...</span>
+</div>
+
+<div id="greeting"></div>
+
+<div id="ar-left">
+  <div class="glass">
+    <div class="g-label">Nhận diện</div>
+    <div class="g-name" id="ar-name">—</div>
+    <div class="g-role" id="ar-role">—</div>
+    <div class="g-conf" id="ar-conf">—</div>
+    <div class="g-ctx"  id="ar-ctx" style="display:none"></div>
+  </div>
+  <div class="glass">
+    <div class="g-label">Gợi ý hội thoại</div>
+    <div class="g-hints" id="ar-hints">
+      <div class="g-hint">Hỏi về sức khỏe hôm nay</div>
+      <div class="g-hint">Hỏi về gia đình</div>
+      <div class="g-hint">Nhắc về lần gặp trước</div>
+    </div>
+  </div>
+</div>
+
+<div id="ar-right">
+  <div class="glass">
+    <div class="g-label">Thông tin</div>
+    <div class="g-row"><span class="k">Mối quan hệ</span><span class="v" id="ar-rel">—</span></div>
+    <div class="g-row"><span class="k">Gặp lần cuối</span><span class="v" id="ar-last">—</span></div>
+    <div class="g-row"><span class="k">Số lần gặp</span><span class="v" id="ar-count">—</span></div>
+  </div>
+  <div class="glass">
+    <div class="g-label">Lịch sử hội thoại</div>
+    <div class="g-hist" id="ar-history">
+      <div class="g-hist-item"><span class="hd">—</span>Chưa có dữ liệu</div>
+    </div>
+  </div>
+</div>
+
+<div id="transcript-wrap">
+  <span id="t-speaker"></span>
+  <div id="t-text"></div>
+  <div id="t-interim"></div>
+</div>
+
+<div id="no-setup" style="display:none">
+  <h2>Chưa cài đặt</h2>
+  <p>Vui lòng mở <code>admin.html</code> để nhập API key và đăng ký khuôn mặt trước.</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script>
+const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+
+// Load config from localStorage (set by admin.html)
+const dgKey     = localStorage.getItem('ml_dg_key')     || '';
+const claudeKey = localStorage.getItem('ml_claude_key') || '';
+
+// Load persons
+let persons = [];
+try {
+  const raw = localStorage.getItem('ml_persons_v5') || localStorage.getItem('ml_persons_v4') || localStorage.getItem('ml_persons') || '[]';
+  persons = JSON.parse(raw).map(p => ({
+    ...p,
+    descriptors: p.descriptors.map(d => new Float32Array(Object.values(d)))
+  }));
+} catch(e) { persons = []; }
+
+// Check setup
+if (!dgKey || persons.length === 0) {
+  document.getElementById('no-setup').style.display = 'flex';
+}
+
+const video    = document.getElementById('video');
+const canvas   = document.getElementById('canvas');
+const ctx      = canvas.getContext('2d');
+const scanline = document.getElementById('scanline');
+const greeting = document.getElementById('greeting');
+const tSpeaker = document.getElementById('t-speaker');
+const tText    = document.getElementById('t-text');
+const tInterim = document.getElementById('t-interim');
+const arLeft   = document.getElementById('ar-left');
+const arRight  = document.getElementById('ar-right');
+const micDot   = document.getElementById('mic-dot');
+const statusTxt= document.getElementById('status-text');
+
+let matcher = null;
+let detecting = false;
+let lastTime = performance.now(), frameCount = 0;
+let greetTimer = null, subTimer = null, arTimer = null;
+let ws = null, mediaRecorder = null;
+let currentPerson = null;
+let conversationBuffer = [];
+let lastAIInput = '';
+let aiCallTimer = null;
+
+// Speaker tracking
+let speakerTs = {};
+function setSpeaker(name) { speakerTs[name] = Date.now(); }
+function getSpeaker() {
+  const now = Date.now();
+  const alive = Object.entries(speakerTs).filter(([_, ts]) => now - ts < 4000);
+  return alive.length ? alive.sort((a,b) => b[1]-a[1])[0][0] : 'Người nói';
+}
+
+// ── Init ──
+async function init() {
+  statusTxt.textContent = 'Tải model...';
+  await Promise.all([
+    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+    faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
+    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+  ]);
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false
+  });
+  video.srcObject = stream;
+  video.onloadedmetadata = () => {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    rebuildMatcher();
+    startMic();
+    requestAnimationFrame(loop);
+    statusTxt.textContent = 'Đang hoạt động';
+  };
+}
+
+window.addEventListener('resize', () => {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+});
+
+// ── Face loop ──
+let skipFrame = 0;
+async function loop(ts) {
+  if (detecting) { requestAnimationFrame(loop); return; }
+  detecting = true;
+
+  frameCount++;
+  if (ts - lastTime >= 1000) { frameCount = 0; lastTime = ts; }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  skipFrame = (skipFrame + 1) % 2;
+
+  // Scale factor: canvas is window size, video is actual camera res
+  const scaleX = canvas.width  / video.videoWidth;
+  const scaleY = canvas.height / video.videoHeight;
+
+  try {
+    const opts = new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5, inputSize: skipFrame === 0 ? 224 : 160 });
+    let dets;
+    if (skipFrame === 0) {
+      dets = await faceapi.detectAllFaces(video, opts).withFaceLandmarks(true).withFaceDescriptors();
+    } else {
+      dets = await faceapi.detectAllFaces(video, opts).withFaceLandmarks(true);
+    }
+
+    let anyRecognized = false;
+    for (const d of dets) {
+      const b    = d.detection.box;
+      const box  = { x: b.x*scaleX, y: b.y*scaleY, w: b.width*scaleX, h: b.height*scaleY };
+      let label  = null, conf = 0, color = 'rgba(255,255,255,.2)', person = null;
+
+      if (skipFrame === 0 && matcher && d.descriptor) {
+        const match = matcher.findBestMatch(d.descriptor);
+        if (match.distance < 0.45) {
+          label  = match.label;
+          conf   = (1 - match.distance) * 100;
+          color  = 'rgba(79,195,247,.8)';
+          person = persons.find(p => p.name === label);
+          setSpeaker(label);
+          anyRecognized = true;
+          if (currentPerson !== person) {
+            currentPerson = person;
+            conversationBuffer = [];
+          }
+          showARPanels(person, conf);
+        }
+      }
+
+      drawBox(box, color, label, conf);
+
+      ctx.fillStyle = label ? 'rgba(79,195,247,.35)' : 'rgba(255,255,255,.15)';
+      for (const pt of d.landmarks.positions) {
+        ctx.beginPath();
+        ctx.arc(pt.x * scaleX, pt.y * scaleY, 1.5, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+
+    if (!anyRecognized) {
+      const alive = Object.values(speakerTs).some(t => Date.now() - t < 4000);
+      if (!alive) hideARPanels();
+    }
+  } catch(e) {}
+
+  detecting = false;
+  requestAnimationFrame(loop);
+}
+
+function drawBox(box, color, label, conf) {
+  const { x, y, w, h } = box;
+
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = label ? 2 : 1;
+  if (!label) ctx.setLineDash([5, 6]);
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 6); ctx.stroke();
+  ctx.restore();
+
+  // Corners
+  const cs = 14;
+  ctx.strokeStyle = color; ctx.lineWidth = 3;
+  [[x,y,1,1],[x+w,y,-1,1],[x,y+h,1,-1],[x+w,y+h,-1,-1]].forEach(([cx,cy,sx,sy]) => {
+    ctx.beginPath(); ctx.moveTo(cx+sx*cs,cy); ctx.lineTo(cx,cy); ctx.lineTo(cx,cy+sy*cs); ctx.stroke();
+  });
+
+  if (label) {
+    // Label badge
+    ctx.font = '600 14px Outfit, sans-serif';
+    const tw = ctx.measureText(label).width + 60;
+    ctx.fillStyle = 'rgba(4,8,18,.9)';
+    ctx.strokeStyle = 'rgba(79,195,247,.3)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(x, y - 36, tw, 32, 6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#dde8f4'; ctx.fillText(label, x + 10, y - 20);
+    ctx.font = '300 10px DM Mono, monospace';
+    ctx.fillStyle = 'rgba(105,240,174,.9)';
+    ctx.fillText(conf.toFixed(0) + '% match', x + 10, y - 8);
+
+    // Conf bar
+    ctx.fillStyle = 'rgba(79,195,247,.08)';
+    ctx.beginPath(); ctx.roundRect(x, y+h-4, w, 4, [0,0,4,4]); ctx.fill();
+    ctx.fillStyle = 'rgba(79,195,247,.6)';
+    ctx.beginPath(); ctx.roundRect(x, y+h-4, w*conf/100, 4, [0,0,4,4]); ctx.fill();
+  }
+}
+
+// ── AR Panels ──
+function showARPanels(person, conf) {
+  clearTimeout(arTimer);
+  arLeft.classList.add('show'); arRight.classList.add('show');
+
+  document.getElementById('ar-name').textContent  = person.name;
+  document.getElementById('ar-role').textContent  = person.relation;
+  document.getElementById('ar-conf').textContent  = conf.toFixed(0) + '% match';
+  document.getElementById('ar-rel').textContent   = person.relation;
+  document.getElementById('ar-last').textContent  = person.lastSeen ? new Date(person.lastSeen).toLocaleDateString('vi') : 'Lần đầu';
+  document.getElementById('ar-count').textContent = (person.meetCount || 1) + ' lần';
+
+  const hist  = person.history || [];
+  const hEl   = document.getElementById('ar-history');
+  hEl.innerHTML = hist.length
+    ? hist.slice(-4).reverse().map(h => `<div class="g-hist-item"><span class="hd">${h.date} </span>${h.text}</div>`).join('')
+    : '<div class="g-hist-item"><span class="hd">—</span>Chưa có dữ liệu</div>';
+
+  updateMeetCount(person);
+  arTimer = setTimeout(hideARPanels, 8000);
+}
+
+function hideARPanels() {
+  arLeft.classList.remove('show'); arRight.classList.remove('show');
+}
+
+function updateMeetCount(person) {
+  const key = 'meet_' + person.name + '_' + new Date().toDateString();
+  if (sessionStorage.getItem(key)) return;
+  sessionStorage.setItem(key, '1');
+  person.meetCount = (person.meetCount || 0) + 1;
+  person.lastSeen  = Date.now();
+  savePersons();
+}
+
+// ── Greeting ──
+function showGreeting(text) {
+  greeting.textContent = text;
+  greeting.classList.add('show');
+  clearTimeout(greetTimer);
+  greetTimer = setTimeout(() => greeting.classList.remove('show'), 6000);
+}
+
+// ── Transcript ──
+function showTranscript(text, isFinal) {
+  const speaker = getSpeaker();
+  tSpeaker.textContent = speaker.toUpperCase();
+  tSpeaker.classList.add('show');
+
+  if (isFinal) {
+    tText.textContent = text;
+    tText.classList.add('show');
+    tInterim.textContent = '';
+    clearTimeout(subTimer);
+    subTimer = setTimeout(() => {
+      tText.classList.remove('show');
+      tSpeaker.classList.remove('show');
+    }, 7000);
+
+    // Save history
+    const person = persons.find(p => p.name === speaker);
+    if (person) {
+      if (!person.history) person.history = [];
+      const today = new Date().toLocaleDateString('vi', { day:'2-digit', month:'2-digit' });
+      person.history.push({ date: today, text: text.slice(0, 45) + (text.length > 45 ? '...' : '') });
+      if (person.history.length > 20) person.history = person.history.slice(-20);
+      savePersons();
+    }
+
+    // Claude AI
+    if (currentPerson && claudeKey) {
+      conversationBuffer.push(text);
+      clearTimeout(aiCallTimer);
+      aiCallTimer = setTimeout(callClaude, 3000);
+    }
+  } else {
+    tInterim.textContent = text;
+  }
+}
+
+// ── Claude AI ──
+async function callClaude() {
+  if (!claudeKey || !currentPerson) return;
+  const recentText = conversationBuffer.slice(-8).join(' ');
+  if (recentText === lastAIInput || recentText.length < 5) return;
+  lastAIInput = recentText;
+
+  const history = (currentPerson.history || []).slice(-6).map(h => `${h.date}: ${h.text}`).join('\n');
+  const prompt  = `Bạn là trợ lý hỗ trợ trí nhớ cho bệnh nhân sa sút trí tuệ.
+
+Người vừa được nhận diện:
+- Tên: ${currentPerson.name}
+- Mối quan hệ: ${currentPerson.relation}
+- Số lần gặp: ${currentPerson.meetCount || 1} lần
+- Lần gặp cuối: ${currentPerson.lastSeen ? new Date(currentPerson.lastSeen).toLocaleDateString('vi') : 'Lần đầu'}
+- Lịch sử hội thoại trước:
+${history || '(chưa có)'}
+
+Cuộc hội thoại hiện tại:
+${recentText}
+
+Trả về JSON (KHÔNG markdown, KHÔNG backtick):
+{
+  "greeting": "câu chào thân mật dưới 10 từ tiếng Việt",
+  "context": "1 câu tóm tắt ngữ cảnh quan trọng nhất (dưới 15 từ)",
+  "hints": ["gợi ý 1 ngắn", "gợi ý 2 ngắn", "gợi ý 3 ngắn"]
+}`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = JSON.parse((await res.text()));
+    if (data.error) return;
+    const json = JSON.parse(data.content[0].text.trim());
+    if (json.greeting) showGreeting(json.greeting);
+    if (json.context) {
+      const el = document.getElementById('ar-ctx');
+      el.textContent = json.context; el.style.display = 'block';
+    }
+    if (json.hints) {
+      document.getElementById('ar-hints').innerHTML = json.hints.map(h => `<div class="g-hint">${h}</div>`).join('');
+    }
+  } catch(e) { console.error('Claude error:', e); }
+}
+
+// ── Deepgram STT ──
+function startMic() {
+  if (!dgKey) return;
+  const types = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
+  const mimeType = types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    ws = new WebSocket(
+      'wss://api.deepgram.com/v1/listen?language=vi&model=nova-2-general&punctuate=true&interim_results=true&endpointing=500&smart_format=true',
+      ['token', dgKey]
+    );
+    ws.onopen = () => {
+      micDot.classList.add('on');
+      statusTxt.textContent = 'Đang hoạt động';
+      scanline.classList.add('on');
+      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      mediaRecorder.ondataavailable = e => { if (ws.readyState === 1 && e.data.size > 0) ws.send(e.data); };
+      mediaRecorder.start(100);
+    };
+    ws.onmessage = e => {
+      try {
+        const d = JSON.parse(e.data);
+        const alt = d?.channel?.alternatives?.[0];
+        if (alt?.transcript?.trim()) showTranscript(alt.transcript.trim(), d.is_final);
+      } catch(_) {}
+    };
+    ws.onerror = () => { statusTxt.textContent = 'Lỗi mic'; };
+  }).catch(e => { statusTxt.textContent = 'Không có mic'; console.error(e); });
+}
+
+// ── Helpers ──
+function rebuildMatcher() {
+  matcher = persons.length
+    ? new faceapi.FaceMatcher(persons.map(p => new faceapi.LabeledFaceDescriptors(p.name, p.descriptors)), 0.5)
+    : null;
+}
+
+function savePersons() {
+  localStorage.setItem('ml_persons_v5', JSON.stringify(
+    persons.map(p => ({ ...p, descriptors: p.descriptors.map(d => Array.from(d)) }))
+  ));
+}
+
+init().catch(e => { statusTxt.textContent = 'Lỗi camera'; console.error(e); });
+</script>
+</body>
+</html>
